@@ -1,0 +1,64 @@
+name: Pack Silk binaries
+description: Build a package's binary archives for the targets this runner can build, for the release action to sign and publish
+branding:
+  icon: archive
+  color: purple
+inputs:
+  directory:
+    description: The directory of the executable package, relative to the workspace.
+    default: '.'
+  targets:
+    description: The targets to build, separated by spaces or lines. Empty builds the package's `[build].targets`, or the host.
+    default: ''
+  artifact-name:
+    description: >-
+      The workflow artifact the archives are uploaded as. The release action collects every
+      `silk-pack-*` artifact; the default names the job, the runner and the targets.
+    default: ''
+outputs:
+  directory:
+    description: The directory holding the archives.
+    value: ${{ steps.pack.outputs.directory }}
+runs:
+  using: composite
+  steps:
+    - name: Pack the binaries
+      id: pack
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      env:
+        TARGETS: ${{ inputs.targets }}
+        NAMED: ${{ inputs.artifact-name }}
+      run: |
+        # Build runners never see the signing key: the release job signs what they upload.
+        unset SILK_SIGNING_KEY SILK_SIGNING_PASSWORD
+        out="$RUNNER_TEMP/silk-pack"
+        rm -rf "$out"
+        flags=()
+        for target in $TARGETS; do flags+=(--target "$target"); done
+        silk pack --bin --json --output "$out" "${flags[@]}" > "$RUNNER_TEMP/silk-pack.json"
+        # Only the binary archives travel; the release job packs the source archive itself.
+        keep="$RUNNER_TEMP/silk-pack-binaries"
+        rm -rf "$keep"
+        mkdir -p "$keep"
+        jq -r '.archives[].binaries[].path' "$RUNNER_TEMP/silk-pack.json" | while IFS= read -r archive; do
+          cp "$archive" "$keep/"
+        done
+        if [ -z "$(ls -A "$keep")" ]; then
+          echo "::error::silk pack wrote no binary archive; is the package an executable?" >&2
+          exit 1
+        fi
+        ls -l "$keep"
+        echo "directory=$keep" >> "$GITHUB_OUTPUT"
+        name=$NAMED
+        if [ -z "$name" ]; then
+          name="silk-pack-$GITHUB_JOB-$RUNNER_OS-$RUNNER_ARCH-$(printf '%s' "$TARGETS" | cksum | cut -d ' ' -f 1)"
+        fi
+        echo "artifact=$name" >> "$GITHUB_OUTPUT"
+    - name: Upload the archives
+      uses: actions/upload-artifact@v5
+      with:
+        name: ${{ steps.pack.outputs.artifact }}
+        path: ${{ steps.pack.outputs.directory }}
+        if-no-files-found: error
+        retention-days: 1

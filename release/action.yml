@@ -1,0 +1,143 @@
+name: Release a Silk package
+description: Keep a release pull request for the pending `silk change` notes, and publish a signed GitHub Release when it merges
+branding:
+  icon: tag
+  color: purple
+inputs:
+  token:
+    description: >-
+      The token that pushes the release branch, opens the pull request and creates the release.
+      Pull requests opened with the workflow's own token do not start other workflows, so pass a
+      GitHub App or personal token when the release pull request must run CI.
+    default: ${{ github.token }}
+  directory:
+    description: The directory of the package to release, relative to the workspace.
+    default: '.'
+  mode:
+    description: >-
+      `auto` picks by the state of the repository; `version` only maintains the release pull
+      request; `publish` only publishes. Split them to give each job its own permissions.
+    default: auto
+  publish:
+    description: >-
+      `pull-request` waits for the release pull request to merge. `auto` versions, commits to the
+      pushed branch and publishes on every push with pending changes, with no pull request.
+    default: pull-request
+  prerelease:
+    description: A prerelease channel such as `beta`; the release is cut as `<next>-beta.N`. Remove it to promote to stable.
+    default: ''
+  snapshot:
+    description: >-
+      `true` also publishes every push with pending changes as a prerelease `<next>-dev.N+<commit>`,
+      without consuming the changes or committing anything.
+    default: 'false'
+  snapshot-number:
+    description: The N of a snapshot version. It must grow with every push.
+    default: ${{ github.run_number }}
+  binaries:
+    description: >-
+      `auto` packs binaries when the package is an executable; `true` and `false` do what they
+      say; `artifacts` takes the archives the pack action uploaded from other jobs.
+    default: auto
+  artifact-pattern:
+    description: The workflow artifacts that hold binary archives, when binaries is `artifacts`.
+    default: silk-pack-*
+  signing-key:
+    description: The minisign secret key text. Without it nothing is signed.
+    default: ''
+  signing-password:
+    description: The password of the secret key, when it is encrypted.
+    default: ''
+  public-key:
+    description: The committed minisign public key to verify the release against. Empty looks for `minisign.pub` in the package and at the repository root.
+    default: ''
+  require-signature:
+    description: Fail when the release cannot be signed and verified.
+    default: 'false'
+  tag-prefix:
+    description: Text before the `v<version>` tag, such as `mylib-` in a repository that releases several packages.
+    default: ''
+  pr-title:
+    description: The release pull request's title. `{name}` and `{version}` are replaced.
+    default: Release {name} {version}
+  pr-draft:
+    description: Open the release pull request as a draft.
+    default: 'false'
+  draft:
+    description: Leave the GitHub Release as a draft for a person to publish.
+    default: 'false'
+  git-user-name:
+    description: The author of the version commit.
+    default: github-actions[bot]
+  git-user-email:
+    description: The author's email. The action rewrites the release branch only while its last commit carries this email.
+    default: 41898282+github-actions[bot]@users.noreply.github.com
+  dry-run:
+    description: Do everything except push, open the pull request and create the release.
+    default: 'false'
+outputs:
+  mode:
+    description: What the run did, `version`, `publish` or `none`.
+    value: ${{ steps.release.outputs.mode }}
+  has-changes:
+    description: Whether changes were pending.
+    value: ${{ steps.release.outputs.has-changes }}
+  pr-number:
+    description: The release pull request.
+    value: ${{ steps.release.outputs.pr-number }}
+  published:
+    description: Whether a release was published.
+    value: ${{ steps.release.outputs.published }}
+  version:
+    description: The version the pull request prepares or the release published.
+    value: ${{ steps.release.outputs.version }}
+  tag:
+    description: The published release's tag.
+    value: ${{ steps.release.outputs.tag }}
+  release-url:
+    description: The published release's page.
+    value: ${{ steps.release.outputs.release-url }}
+  assets:
+    description: What `silk pack --json` wrote, for later steps.
+    value: ${{ steps.release.outputs.assets }}
+  snapshot-version:
+    description: The snapshot's version, when one was published.
+    value: ${{ steps.release.outputs.snapshot-version }}
+  snapshot-tag:
+    description: The snapshot's tag, when one was published.
+    value: ${{ steps.release.outputs.snapshot-tag }}
+runs:
+  using: composite
+  steps:
+    - name: Fetch the binary archives other jobs packed
+      if: inputs.binaries == 'artifacts'
+      uses: actions/download-artifact@v5
+      with:
+        pattern: ${{ inputs.artifact-pattern }}
+        path: ${{ runner.temp }}/silk-pack-artifacts
+        merge-multiple: true
+    - name: Release
+      id: release
+      shell: bash
+      working-directory: ${{ inputs.directory }}
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PUBLISH: ${{ inputs.publish }}
+        INPUT_PRERELEASE: ${{ inputs.prerelease }}
+        INPUT_SNAPSHOT: ${{ inputs.snapshot }}
+        INPUT_SNAPSHOT_NUMBER: ${{ inputs.snapshot-number }}
+        INPUT_BINARIES: ${{ inputs.binaries }}
+        INPUT_ARTIFACTS: ${{ runner.temp }}/silk-pack-artifacts
+        INPUT_SIGNING_KEY: ${{ inputs.signing-key }}
+        INPUT_SIGNING_PASSWORD: ${{ inputs.signing-password }}
+        INPUT_PUBLIC_KEY: ${{ inputs.public-key }}
+        INPUT_REQUIRE_SIGNATURE: ${{ inputs.require-signature }}
+        INPUT_TAG_PREFIX: ${{ inputs.tag-prefix }}
+        INPUT_PR_TITLE: ${{ inputs.pr-title }}
+        INPUT_PR_DRAFT: ${{ inputs.pr-draft }}
+        INPUT_DRAFT: ${{ inputs.draft }}
+        INPUT_GIT_USER_NAME: ${{ inputs.git-user-name }}
+        INPUT_GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      run: bash "$GITHUB_ACTION_PATH/release.sh"

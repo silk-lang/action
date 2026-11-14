@@ -31,3 +31,46 @@ jobs:
           silk check
           silk test
           silk run
+
+  # The release action's whole flow against a local remote and a stand-in gh: the release pull
+  # request, its update, the signed publish, a rerun, a snapshot, publish: auto and collected
+  # binaries.
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./
+        with:
+          working-directory: test
+          cache: false
+      - run: sudo apt-get update && sudo apt-get install -y minisign
+      - run: test/release/run.sh
+
+  # The release and pack actions as a workflow uses them, stopping short of GitHub.
+  release-dry-run:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./
+        with:
+          working-directory: test
+          cache: false
+      - name: Record a change in the test package
+        working-directory: test
+        run: silk change minor "Try the release action"
+      - id: release
+        uses: ./release
+        with:
+          directory: test
+          dry-run: true
+      - name: The action prepared the next version
+        run: |
+          test "${{ steps.release.outputs.mode }}" = version
+          test "${{ steps.release.outputs.version }}" = 0.2.0
+          test "$(git log -1 --format=%s)" = "Release action-test 0.2.0"
+      - id: pack
+        uses: ./pack
+        with:
+          directory: test
+      - name: The pack action wrote a binary archive
+        run: ls "${{ steps.pack.outputs.directory }}"/action-test-0.2.0-*.tar.gz

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# A stand-in for the GitHub CLI in the release action's test: pull requests and releases are files
+# under $GH_STATE, and publishing a release creates its tag in the test's bare remote.
+set -euo pipefail
+state=$GH_STATE
+mkdir -p "$state/releases"
+echo "gh $*" >> "$state/calls"
+group=$1; verb=$2; shift 2
+value_of() { local want=$1; shift; while [ $# -gt 0 ]; do if [ "$1" = "$want" ]; then echo "$2"; return; fi; shift; done; }
+has() { local want=$1; shift; for one in "$@"; do if [ "$one" = "$want" ]; then return 0; fi; done; return 1; }
+case "$group $verb" in
+  'pr list')
+    if [ -f "$state/pr-number" ]; then cat "$state/pr-number"; fi ;;
+  'pr create')
+    echo 7 > "$state/pr-number"
+    value_of --title "$@" > "$state/pr-title"
+    cp "$(value_of --body-file "$@")" "$state/pr-body"
+    if has --draft "$@"; then echo true > "$state/pr-draft"; fi
+    echo "https://github.com/example/repo/pull/7" ;;
+  'pr edit')
+    value_of --title "$@" > "$state/pr-title"
+    cp "$(value_of --body-file "$@")" "$state/pr-body"
+    echo edited >> "$state/pr-edits" ;;
+  'release view')
+    tag=$1
+    [ -d "$state/releases/$tag" ] || exit 1
+    if has isDraft "$@"; then cat "$state/releases/$tag/.draft"; else echo "https://github.com/example/repo/releases/tag/$tag"; fi ;;
+  'release delete')
+    rm -rf "$state/releases/$1" ;;
+  'release create')
+    tag=$1; shift
+    mkdir "$state/releases/$tag"
+    echo true > "$state/releases/$tag/.draft"
+    echo false > "$state/releases/$tag/.prerelease"
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --draft) ;;
+        --prerelease) echo true > "$state/releases/$tag/.prerelease" ;;
+        --target) echo "$2" > "$state/releases/$tag/.target"; shift ;;
+        --title) echo "$2" > "$state/releases/$tag/.title"; shift ;;
+        --notes-file) cp "$2" "$state/releases/$tag/.notes"; shift ;;
+        *) cp "$1" "$state/releases/$tag/" ;;
+      esac
+      shift
+    done ;;
+  'release download')
+    tag=$1
+    cp "$state/releases/$tag"/* "$(value_of --dir "$@")/" ;;
+  'release edit')
+    tag=$1
+    if has --draft=false "$@"; then
+      echo false > "$state/releases/$tag/.draft"
+      git --git-dir="$GH_REMOTE" tag "$tag" "$(cat "$state/releases/$tag/.target")"
+    fi
+    if has --latest=false "$@"; then echo false > "$state/releases/$tag/.latest"; fi ;;
+  *) echo "the gh stand-in does not know: $group $verb" >&2; exit 2 ;;
+esac
