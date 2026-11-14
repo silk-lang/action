@@ -36,7 +36,7 @@ runs:
         rm -rf "$out"
         flags=()
         for target in $TARGETS; do flags+=(--target "$target"); done
-        silk pack --bin --json --output "$out" "${flags[@]}" > "$RUNNER_TEMP/silk-pack.json"
+        silk pack --bin --json --output "$out" ${flags[@]+"${flags[@]}"} > "$RUNNER_TEMP/silk-pack.json"
         # Only the binary archives travel; the release job packs the source archive itself.
         keep="$RUNNER_TEMP/silk-pack-binaries"
         rm -rf "$keep"

@@ -159,7 +159,7 @@ pack() {
     if [ "$(manifest_kind)" = executable ]; then with_binaries=true; fi
   fi
   if [ "$with_binaries" = true ]; then flags+=(--bin); fi
-  silk pack --json --output "$out" "${flags[@]}" > "$work/pack.json"
+  silk pack --json --output "$out" ${flags[@]+"${flags[@]}"} > "$work/pack.json"
   if [ "$with_binaries" = artifacts ]; then
     [ -d "$artifacts" ] || fail "binaries is artifacts and the directory '$artifacts' does not exist"
     local found=false file
@@ -188,7 +188,7 @@ publish_release() {
   fi
   local flags=(--draft --target "$commit" --title "$title" --notes-file "$notes")
   if [ "$pre" = true ]; then flags+=(--prerelease); fi
-  gh release create "$tag" "${flags[@]}" "$out"/*
+  gh release create "$tag" ${flags[@]+"${flags[@]}"} "$out"/*
   mkdir "$work/uploaded"
   gh release download "$tag" --dir "$work/uploaded"
   verify "$work/uploaded"
@@ -198,7 +198,7 @@ publish_release() {
   else
     local edit=(--draft=false)
     if [ "$pre" = true ]; then edit+=(--latest=false); fi
-    gh release edit "$tag" "${edit[@]}" >/dev/null
+    gh release edit "$tag" ${edit[@]+"${edit[@]}"} >/dev/null
     summary "Published $tag."
   fi
   output published true
@@ -260,7 +260,7 @@ publish_snapshot() {
 version_commit() {
   local flags=()
   if [ -n "$prerelease" ]; then flags+=(--tag "$prerelease"); fi
-  silk change version "${flags[@]}"
+  silk change version ${flags[@]+"${flags[@]}"}
   load_release || fail "silk change version left no prepared release: $(tail -n 1 "$work/release.err")"
   git add -u .
   git add CHANGELOG.md .changes/releases
@@ -309,7 +309,7 @@ version_pull_request() {
   else
     local flags=(--head "$branch" --base "$base" --title "$title" --body-file "$work/pr.md")
     if [ "$pr_draft" = true ]; then flags+=(--draft); fi
-    number=$(gh pr create "${flags[@]}" | sed -n 's|.*/pull/\([0-9][0-9]*\).*|\1|p' | tail -n 1)
+    number=$(gh pr create ${flags[@]+"${flags[@]}"} | sed -n 's|.*/pull/\([0-9][0-9]*\).*|\1|p' | tail -n 1)
     summary "Opened the release pull request #$number: $title"
   fi
   output pr-number "$number"
