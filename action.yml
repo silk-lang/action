@@ -1,0 +1,191 @@
+name: Set up Silk
+description: Install the Silk version a project pins, the Clang it builds with, and keep Silk's build cache between runs
+branding:
+  icon: package
+  color: purple
+inputs:
+  version:
+    description: >-
+      The Silk release to install, such as 0.1.0-dev.74+205aea3f5b2e or its tag. Empty installs the
+      version the project pins as `silk-version` in silk.toml, or the latest release when it pins
+      none.
+    default: ''
+  working-directory:
+    description: The directory of the project's silk.toml, relative to the workspace.
+    default: '.'
+  clang:
+    description: Install Clang 22 and lld when the runner has none, and point SILK_CLANG at it.
+    default: 'true'
+  cache:
+    description: Restore Silk's build directory and git dependencies from an earlier run.
+    default: 'true'
+  cache-save:
+    description: >-
+      When the job saves its cache: `auto` saves on the default branch only, which pull requests
+      then restore; `always` and `never` do what they say.
+    default: auto
+  cache-key:
+    description: >-
+      Names this job's cache among the jobs of a workflow. Jobs that build different things keep
+      different caches; the default is the job id, with the matrix values when there are any.
+    default: ''
+  cache-paths:
+    description: >-
+      The directories to keep, one per line, relative to working-directory. `build` is where Silk
+      writes unless `[workspace].output-dir` or `[build].output-dir` names another directory.
+    default: build
+outputs:
+  version:
+    description: The installed Silk version.
+    value: ${{ steps.install.outputs.version }}
+  cache-hit:
+    description: Whether a cache was restored, from this commit or an earlier one.
+    value: ${{ steps.restore.outputs.cache-matched-key != '' || steps.cache.outputs.cache-matched-key != '' }}
+runs:
+  using: composite
+  steps:
+    - name: Find the pinned Silk version
+      id: pin
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        REQUESTED: ${{ inputs.version }}
+      run: |
+        version=${REQUESTED#v}
+        if [ -z "$version" ] && [ -f silk.toml ]; then
+          version=$(sed -n 's/^[[:space:]]*silk-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' silk.toml | head -n 1)
+        fi
+        # A project pinned to 0.0.0 builds with whatever Silk is installed.
+        if [ "$version" = 0.0.0 ]; then version=; fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Install Clang 22 (Linux)
+      if: inputs.clang == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        if [ ! -x /usr/bin/clang-22 ]; then
+          sudo apt-get update
+          if ! sudo apt-get install -y clang-22 lld-22; then
+            # Releases older than Ubuntu 26.04 take Clang 22 from apt.llvm.org.
+            curl --fail --location --retry 3 https://apt.llvm.org/llvm.sh --output "$RUNNER_TEMP/llvm.sh"
+            sudo bash "$RUNNER_TEMP/llvm.sh" 22
+            sudo apt-get install -y lld-22
+          fi
+        fi
+        echo "SILK_CLANG=/usr/bin/clang-22" >> "$GITHUB_ENV"
+
+    - name: Install Clang 22 (macOS)
+      if: inputs.clang == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        prefix=$(brew --prefix)
+        test -x "$prefix/opt/llvm@22/bin/clang" || brew install llvm@22
+        test -x "$prefix/opt/lld@22/bin/ld64.lld" || brew install lld@22
+        echo "SILK_CLANG=$prefix/opt/llvm@22/bin/clang" >> "$GITHUB_ENV"
+        echo "$prefix/opt/lld@22/bin" >> "$GITHUB_PATH"
+        echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+
+    - name: Install Clang 22 (Windows)
+      if: inputs.clang == 'true' && runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $clang = "C:\Program Files\LLVM\bin\clang.exe"
+        $major = 0
+        if (Test-Path $clang) { $major = [int]((& $clang --version | Select-Object -First 1) -replace '.*version (\d+).*', '$1') }
+        if ($major -lt 22) {
+          choco install llvm --version=22.1.8 --allow-downgrade --force -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Installing LLVM 22 failed' }
+        }
+        "SILK_CLANG=$clang" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+    - name: Install Silk
+      id: install
+      if: runner.os != 'Windows'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PINNED: ${{ steps.pin.outputs.version }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        if [ -n "$PINNED" ]; then export SILK_RELEASE="v$PINNED"; fi
+        curl --fail --location --retry 3 https://raw.githubusercontent.com/silk-lang/silk/main/install.sh --output "$RUNNER_TEMP/install-silk.sh"
+        sh "$RUNNER_TEMP/install-silk.sh"
+        echo "$HOME/.silk/bin" >> "$GITHUB_PATH"
+        export PATH="$HOME/.silk/bin:$PATH"
+        silk use
+        echo "version=$(silk --version | sed 's/^silk v//')" >> "$GITHUB_OUTPUT"
+
+    - name: Install Silk (Windows)
+      id: install-windows
+      if: runner.os == 'Windows'
+      shell: pwsh
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PINNED: ${{ steps.pin.outputs.version }}
+        GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        if ($env:PINNED) { $env:SILK_RELEASE = "v$($env:PINNED)" }
+        Invoke-WebRequest https://raw.githubusercontent.com/silk-lang/silk/main/install.ps1 -OutFile "$env:RUNNER_TEMP/install-silk.ps1"
+        & "$env:RUNNER_TEMP/install-silk.ps1"
+        "$env:USERPROFILE/.silk/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        $env:PATH = "$env:USERPROFILE/.silk/bin;$env:PATH"
+        silk use
+        "version=$((silk --version) -replace '^silk v', '')" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+    # What Silk keeps is named by content, so a cache from another commit is still right: Silk
+    # checks, builds and tests again only what changed since. The key ends in the commit so every
+    # saved cache is new, and a restore takes the latest one saved for this job.
+    - name: Name the cache
+      id: key
+      if: inputs.cache == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NAMED: ${{ inputs.cache-key }}
+        JOB: ${{ github.job }}
+        MATRIX: ${{ toJSON(matrix) }}
+        PATHS: ${{ inputs.cache-paths }}
+        SAVE: ${{ inputs.cache-save }}
+        ON_DEFAULT: ${{ github.ref_name == github.event.repository.default_branch }}
+        VERSION: ${{ steps.install.outputs.version }}${{ steps.install-windows.outputs.version }}
+      run: |
+        name=$NAMED
+        if [ -z "$name" ]; then
+          name=$JOB
+          if [ "$MATRIX" != null ] && [ -n "$MATRIX" ]; then
+            name="$name-$(printf '%s' "$MATRIX" | cksum | cut -d ' ' -f 1)"
+          fi
+        fi
+        echo "prefix=silk-${RUNNER_OS}-${RUNNER_ARCH}-${VERSION}-${name}-" >> "$GITHUB_OUTPUT"
+        {
+          echo 'paths<<SILK_PATHS'
+          printf '%s\n' "$PATHS" | while IFS= read -r line; do
+            line=$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+            if [ -n "$line" ]; then echo "$PWD/$line"; fi
+          done
+          echo "$HOME/.silk/git"
+          echo 'SILK_PATHS'
+        } >> "$GITHUB_OUTPUT"
+        save=false
+        if [ "$SAVE" = always ]; then save=true; fi
+        if [ "$SAVE" = auto ] && [ "$ON_DEFAULT" = true ]; then save=true; fi
+        echo "save=$save" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Silk cache
+      id: restore
+      if: inputs.cache == 'true' && steps.key.outputs.save != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ steps.key.outputs.paths }}
+        key: ${{ steps.key.outputs.prefix }}${{ github.sha }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    # Saves when the job ends, if it passed.
+    - name: Restore the Silk cache, and save it after the job
+      id: cache
+      if: inputs.cache == 'true' && steps.key.outputs.save == 'true'
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.key.outputs.paths }}
+        key: ${{ steps.key.outputs.prefix }}${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ${{ steps.key.outputs.prefix }}

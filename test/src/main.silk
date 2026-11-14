@@ -1,0 +1,14 @@
+import silk.testing.testing { AssertionError, Testing }
+
+pub fn double(value: i32) -> i32 {
+  return value * 2
+}
+
+pub fn main() -> i32 {
+  return double(21) - 42
+}
+
+test effect fn doubles() -> ()
+  ! AssertionError<'static> {
+  run Testing.expect(double(2) == 4, "2 doubled is 4")
+}

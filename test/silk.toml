@@ -1,0 +1,6 @@
+[package]
+name = "action-test"
+version = "0.1.0"
+kind = "executable"
+source = "src"
+main = "main.silk"

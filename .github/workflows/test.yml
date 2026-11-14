@@ -1,0 +1,33 @@
+name: Test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, ubuntu-24.04, macos-26, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: silk
+        uses: ./
+        with:
+          working-directory: test
+          cache-save: always
+      - name: Report what the action found
+        shell: bash
+        run: |
+          echo "version: ${{ steps.silk.outputs.version }}"
+          echo "cache-hit: ${{ steps.silk.outputs.cache-hit }}"
+          echo "SILK_CLANG: $SILK_CLANG"
+          silk --version
+      - name: Check, test and run the project
+        shell: bash
+        working-directory: test
+        run: |
+          silk check
+          silk test
+          silk run
