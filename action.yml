@@ -112,7 +112,8 @@ runs:
         sh "$RUNNER_TEMP/install-silk.sh"
         echo "$HOME/.silk/bin" >> "$GITHUB_PATH"
         export PATH="$HOME/.silk/bin:$PATH"
-        silk use
+        # Selects the project's pinned version. A project that pins none uses the one just installed.
+        if [ -n "$PINNED" ]; then silk use; fi
         echo "version=$(silk --version | sed 's/^silk v//')" >> "$GITHUB_OUTPUT"
 
     - name: Install Silk (Windows)
@@ -129,7 +130,7 @@ runs:
         & "$env:RUNNER_TEMP/install-silk.ps1"
         "$env:USERPROFILE/.silk/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         $env:PATH = "$env:USERPROFILE/.silk/bin;$env:PATH"
-        silk use
+        if ($env:PINNED) { silk use }
         "version=$((silk --version) -replace '^silk v', '')" | Out-File $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
     # What Silk keeps is named by content, so a cache from another commit is still right: Silk
@@ -174,7 +175,7 @@ runs:
     - name: Restore the Silk cache
       id: restore
       if: inputs.cache == 'true' && steps.key.outputs.save != 'true'
-      uses: actions/cache/restore@v4
+      uses: actions/cache/restore@v5
       with:
         path: ${{ steps.key.outputs.paths }}
         key: ${{ steps.key.outputs.prefix }}${{ github.sha }}
@@ -184,7 +185,7 @@ runs:
     - name: Restore the Silk cache, and save it after the job
       id: cache
       if: inputs.cache == 'true' && steps.key.outputs.save == 'true'
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ steps.key.outputs.paths }}
         key: ${{ steps.key.outputs.prefix }}${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}

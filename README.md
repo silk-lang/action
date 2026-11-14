@@ -8,7 +8,7 @@ jobs:
   test:
     runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: silk-lang/action@v1
       - run: silk check --workspace
       - run: silk test
